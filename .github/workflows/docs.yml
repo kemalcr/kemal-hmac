@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: fetch crystal version
         id: crystal-version
@@ -36,7 +36,7 @@ jobs:
 
       - name: upload static files as artifact
         id: deployment
-        uses: actions/upload-pages-artifact@v3.0.1
+        uses: actions/upload-pages-artifact@v4.0.0
         with:
           path: docs/
 
