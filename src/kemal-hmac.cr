@@ -15,7 +15,8 @@ module Kemal
     HMAC_KEY_SUFFIX_LIST         = ENV.fetch("HMAC_KEY_SUFFIX_LIST", "HMAC_SECRET_BLUE,HMAC_SECRET_GREEN").split(",").map(&.strip)
     HMAC_KEY_DELIMITER           = ENV.fetch("HMAC_KEY_DELIMITER", "_")
     KEY_VALIDATION_REGEX         = /^[A-Z0-9][A-Z0-9_-]+[A-Z0-9]$/
-    ALGORITHM                    = algorithm(ENV.fetch("HMAC_ALGORITHM", "SHA256").upcase)
+    HMAC_ALGORITHM_NAME          = ENV.fetch("HMAC_ALGORITHM", "SHA256")
+    ALGORITHM                    = algorithm(HMAC_ALGORITHM_NAME.upcase)
   end
 end
 

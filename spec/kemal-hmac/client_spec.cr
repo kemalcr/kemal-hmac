@@ -11,6 +11,42 @@ describe "Kemal::Hmac::Client" do
     client.should_not be_nil
   end
 
+  it "uses the server's default algorithm" do
+    name = "test-client"
+    secret = "test-secret"
+    path = "/api/path"
+    headers = Kemal::Hmac::Client.new(name, secret).generate_headers(path)
+    handler = Kemal::Hmac::Handler.new({name => [secret]})
+
+    handler.valid_token?(
+      headers[Kemal::Hmac::HMAC_TOKEN_HEADER], secret, name, path,
+      headers[Kemal::Hmac::HMAC_TIMESTAMP_HEADER],
+    ).should be_true
+  end
+
+  it "rejects an unrecognized algorithm instead of defaulting to SHA256" do
+    expect_raises(ArgumentError, /Unknown HMAC algorithm/) do
+      Kemal::Hmac::Client.new("test-client", "test-secret", "SHA-512")
+    end
+    expect_raises(ArgumentError, /Unknown HMAC algorithm/) do
+      Kemal::Hmac::Handler.new(hmac_algorithm: "SHA-512")
+    end
+  end
+
+  it "rejects an unavailable algorithm when configuring a client or handler" do
+    if OpenSSL::HMAC.digest(OpenSSL::Algorithm::MD4, "test-key", "test-message").empty?
+      expect_raises(ArgumentError, /MD4.*unavailable/) do
+        Kemal::Hmac::Client.new("test-client", "test-secret", "MD4")
+      end
+      expect_raises(ArgumentError, /MD4.*unavailable/) do
+        Kemal::Hmac::Handler.new(hmac_algorithm: "MD4")
+      end
+    else
+      Kemal::Hmac::Client.new("test-client", "test-secret", "MD4").should be_a(Kemal::Hmac::Client)
+      Kemal::Hmac::Handler.new(hmac_algorithm: "MD4").should be_a(Kemal::Hmac::Handler)
+    end
+  end
+
   it "should raise an exception if the client name is invalid" do
     begin
       Kemal::Hmac::Client.new("te#!sT", "test", "SHA512")

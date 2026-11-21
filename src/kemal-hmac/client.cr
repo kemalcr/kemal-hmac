@@ -4,12 +4,11 @@ module Kemal::Hmac
   class Client
     # `client` the client name which will be sending HTTP requests to the server using HMAC auth (String)
     # `secret` the secret used to generate the HMAC token in relation to the client (String)
-    # `algorithm` the algorithm used to generate the HMAC token (String) - defaults to SHA256
-    def initialize(client : String, secret : String, algorithm : String? = "SHA256")
+    # `algorithm` the algorithm used to generate the HMAC token (String) - defaults to HMAC_ALGORITHM or SHA256
+    def initialize(client : String, secret : String, algorithm : String? = nil)
       @client = client
       @secret = secret
-      algo = (algorithm || ENV.fetch("HMAC_ALGORITHM", "SHA256")).upcase
-      @algorithm = Kemal::Hmac.algorithm(algo)
+      @algorithm = Kemal::Hmac.resolve_algorithm(algorithm)
 
       unless KEY_VALIDATION_REGEX.match(@client.upcase)
         raise InvalidFormatError.new("client name must only contain letters, numbers, -, or _")

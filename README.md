@@ -211,7 +211,7 @@ These environment variables can be set globally for the `kemal-hmac` middleware 
 | `HMAC_REJECTED_MESSAGE_PREFIX` | `Unauthorized:` | The prefix to add to the response body when a request is rejected |
 | `HMAC_KEY_SUFFIX_LIST` | `HMAC_SECRET_BLUE,HMAC_SECRET_GREEN` | A comma-separated list of key suffixes to use for looking up secrets in the environment. Using a blue/green pattern is best for key rotation |
 | `HMAC_KEY_DELIMITER` | `_` | The delimiter to use for separating the client name from the key suffix in the environment variable name |
-| `HMAC_ALGORITHM` | `SHA256` | The algorithm to use for generating the HMAC token. See [here](./src/kemal-hmac/hmac_algorithm.cr) for all supported algorithms |
+| `HMAC_ALGORITHM` | `SHA256` | The default algorithm for the client and middleware. The algorithm must be recognized and available in the active OpenSSL configuration. |
 
 ### Direct Middleware Configuration
 
@@ -255,7 +255,7 @@ hmac-token = "LongHashHere
 
 ### Initialization
 
-To initialize the `Kemal::Hmac::Client` class, you need to provide the client name, secret, and optionally, the algorithm used to generate the HMAC token. The default algorithm is SHA256.
+To initialize the `Kemal::Hmac::Client` class, you need to provide the client name, secret, and optionally, the algorithm used to generate the HMAC token. When no algorithm is supplied, both the client and middleware use `HMAC_ALGORITHM`, falling back to `SHA256` when the variable is unset. An unknown or unavailable algorithm raises an error during initialization.
 
 ```crystal
 require "kemal-hmac"

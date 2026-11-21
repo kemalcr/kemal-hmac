@@ -35,3 +35,10 @@ jobs:
 
       - name: test
         run: script/test
+
+      - name: test non-default HMAC algorithm
+        env:
+          HMAC_ALGORITHM: SHA512
+        run: |
+          source script/setup-env
+          crystal spec spec/kemal-hmac/client_spec.cr --exclude-warnings "$SHARDS_INSTALL_PATH" --example "uses the server's default algorithm"

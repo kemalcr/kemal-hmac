@@ -14,6 +14,18 @@ module Kemal::Hmac
     OpenSSL::Algorithm.new(algorithms(algorithm))
   end
 
+  def self.resolve_algorithm(name : String?) : OpenSSL::Algorithm
+    name ||= HMAC_ALGORITHM_NAME
+    normalized = name.upcase
+    selected = OpenSSL::Algorithm.values.find { |algorithm| algorithm.to_s.upcase == normalized }
+    raise ArgumentError.new("Unknown HMAC algorithm #{name.inspect}") unless selected
+
+    if OpenSSL::HMAC.digest(selected, "kemal-hmac", "algorithm check").empty?
+      raise ArgumentError.new("HMAC algorithm #{selected} is unavailable with the current OpenSSL configuration")
+    end
+    selected
+  end
+
   # select the algorithm based on the string name and falls back to SHA256 if no match is found
   def self.algorithms(algorithm) : Int32
     case algorithm

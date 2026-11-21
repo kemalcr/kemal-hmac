@@ -153,14 +153,7 @@ module Kemal::Hmac
     end
 
     def fetch_hmac_algorithm(algorithm : String?) : OpenSSL::Algorithm
-      determined_hmac_algorithm : OpenSSL::Algorithm
-      if algorithm.nil?
-        determined_hmac_algorithm = ALGORITHM
-      else
-        determined_hmac_algorithm = Kemal::Hmac.algorithm(algorithm.upcase) || ALGORITHM
-      end
-
-      return determined_hmac_algorithm
+      Kemal::Hmac.resolve_algorithm(algorithm)
     end
 
     # Load the secrets for the given client
