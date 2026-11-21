@@ -62,7 +62,7 @@ require "kemal-hmac"
 # Note: You can use more than one client name and secret pair. You can also use multiple secrets for the same client name (helps with key rotation)
 hmac_auth({"my_client" => ["my_secret"]})
 
-# Now all endpoints are protected with HMAC authentication
+# Application routes now require HMAC authentication
 # env.kemal_authorized_client? will return the client name that was used to authenticate the request
 get "/" do |env|
   "Hi, %s! You sent a request that was successfully verified with HMAC auth" % env.kemal_authorized_client?
@@ -79,6 +79,8 @@ Kemal.run
 # $ crystal run hmac_server.cr
 # [development] Kemal is ready to lead at http://0.0.0.0:3000
 ```
+
+By default, Kemal serves files from `public/` before running custom middleware, so those files remain public. Set `Kemal.config.serve_static = false` before `Kemal.run` if files must be served through authenticated application routes.
 
 In a new terminal, you can send a request into the kemal server and verify that HMAC authentication is working:
 
@@ -185,7 +187,7 @@ require "kemal-hmac"
 # Initialize the HMAC middleware with the 'enable_env_lookup: true' param so it can self-hydrate from the environment variables
 hmac_auth(enable_env_lookup: true)
 
-# Now all endpoints are protected with HMAC authentication
+# Application routes now require HMAC authentication
 get "/" do |env|
   "Hi, %s! You sent a request that was successfully verified with HMAC auth using environment variables" % env.kemal_authorized_client?
 end
@@ -196,6 +198,8 @@ end
 ## Configuration
 
 This section goes into detail on the configuration options available for the `kemal-hmac` middleware and the client utility.
+
+An empty string in `hmac_secrets` raises an error during middleware initialization. Empty environment-variable slots are ignored so the remaining populated rotation key can be used.
 
 ### Global Environment Variables
 

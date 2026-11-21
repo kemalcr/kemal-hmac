@@ -1,6 +1,38 @@
 require "../spec_helper"
 
 describe "Kemal::Hmac" do
+  it "rejects a configured empty secret even when another rotation key is present" do
+    expect_raises(ArgumentError, /empty HMAC secret/) do
+      Kemal::Hmac::Handler.new({"test-client" => ["active-key", ""]})
+    end
+  end
+
+  it "honors in-process key rotation and skips newly empty slots" do
+    secrets = ["previous-key"]
+    handler = Kemal::Hmac::Handler.new({"test-client" => secrets})
+
+    secrets.replace(["", "rotated-key"])
+
+    handler.load_secrets("test-client").should eq(["rotated-key"])
+  end
+
+  it "skips an empty environment slot and uses a populated rotation slot" do
+    client = "empty-env-slot-spec"
+    blue = "#{client.upcase}_SPEC_BLUE"
+    green = "#{client.upcase}_SPEC_GREEN"
+    previous_blue = ENV[blue]?
+    previous_green = ENV[green]?
+    begin
+      ENV[blue] = ""
+      ENV[green] = "active-key"
+      handler = Kemal::Hmac::Handler.new(enable_env_lookup: true, hmac_key_suffix_list: ["SPEC_BLUE", "SPEC_GREEN"], hmac_key_delimiter: "_")
+      handler.load_secrets(client).should eq(["active-key"])
+    ensure
+      ENV[blue] = previous_blue
+      ENV[green] = previous_green
+    end
+  end
+
   it "uses a custom handler with path matching and sends a request to an endpoint that does not require hmac auth" do
     hmac_handler = SpecAuthHandler.new(
       hmac_secrets: {"octo-client" => ["octo-secret-blue", "octo-secret-green"]},

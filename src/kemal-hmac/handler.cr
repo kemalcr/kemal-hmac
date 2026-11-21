@@ -148,6 +148,9 @@ module Kemal::Hmac
     # This ensures that client names passed in via headers exactly match the keys in the secrets cache
     def normalize_client_hash(dict : Hash(String, Array(String))) : Hash(String, Array(String))
       dict.each_with_object({} of String => Array(String)) do |(k, v), new_dict|
+        if v.any?(&.empty?)
+          raise ArgumentError.new("Client #{k.inspect} has an empty HMAC secret")
+        end
         new_dict[k.upcase] = v
       end
     end
@@ -169,8 +172,8 @@ module Kemal::Hmac
       key = client.upcase
 
       # before doing a full lookup, check the cache first
-      if @secrets_cache.has_key?(key)
-        return @secrets_cache[key]
+      if secrets = @secrets_cache[key]?
+        return secrets.any?(&.empty?) ? secrets.reject(&.empty?) : secrets
       end
 
       # exit early if env lookups are explicitly disabled
@@ -183,7 +186,8 @@ module Kemal::Hmac
       # if we make it here, check the environment variables
       client_secrets = @hmac_key_suffix_list.compact_map do |suffix|
         env_key = [key, suffix].join(@hmac_key_delimiter).upcase
-        ENV.fetch(env_key, nil)
+        secret = ENV[env_key]?
+        secret unless secret.nil? || secret.empty?
       end
 
       # if client_secrets is not empty, add it to the cache
