@@ -33,8 +33,10 @@ def hmac_auth(
   hmac_key_delimiter : String? = nil,
   hmac_algorithm : String? = nil,
   enable_env_lookup : Bool = false,
+  signature_version : Int32? = nil,
+  max_signed_body_bytes : Int32? = nil,
 )
-  add_handler Kemal.config.hmac_handler.new(
+  handler = Kemal.config.hmac_handler.new(
     hmac_secrets: hmac_secrets,
     hmac_client_header: hmac_client_header,
     hmac_timestamp_header: hmac_timestamp_header,
@@ -47,4 +49,8 @@ def hmac_auth(
     hmac_algorithm: hmac_algorithm,
     enable_env_lookup: enable_env_lookup,
   )
+  if signature_version || max_signed_body_bytes
+    handler.configure_signatures(signature_version, max_signed_body_bytes)
+  end
+  add_handler handler
 end

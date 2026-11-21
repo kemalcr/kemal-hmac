@@ -498,3 +498,138 @@ describe "Kemal::Hmac" do
     context.kemal_authorized_client?.should eq(nil)
   end
 end
+
+describe "Version 2 request signatures" do
+  it "authenticates a signed binary body and leaves it available to the route" do
+    name = "test-client"
+    secret = "test-secret"
+    target = "/api/Report?filter=Jane%20Doe&order=desc"
+    body = Bytes[0, 128, 255]
+    client = Kemal::Hmac::Client.new(name, secret)
+    headers = HTTP::Headers.new
+    client.generate_headers("POST", target, body).each { |key, value| headers[key] = value }
+    request = HTTP::Request.new("POST", target, headers, body)
+    request.path.should eq("/api/Report")
+    handler = hmac_auth({name => [secret]}, signature_version: 2, max_signed_body_bytes: body.size).last[1]
+    handler.next = ->(context : HTTP::Server::Context) do
+      context.request.body.not_nil!.read_bytes(UInt8).should eq(0)
+      context.request.body.not_nil!.read_bytes(UInt8).should eq(128)
+      context.request.body.not_nil!.read_bytes(UInt8).should eq(255)
+      context.response.print "signed body received"
+    end
+
+    io, context = create_request_and_return_io_and_context(handler, request)
+
+    context.response.status_code.should eq(200)
+    context.kemal_authorized_client?.should eq(name)
+    io.gets_to_end.should contain("signed body received")
+  end
+
+  it "binds each request field to the signature" do
+    name = "test-client"
+    secret = "test-secret"
+    timestamp = "2026-01-01T00:00:00Z"
+    target = "/api/Report?format=json"
+    body = "report content"
+    algorithm = OpenSSL::Algorithm::SHA256
+    signature = Kemal::Hmac::Token.for_request(name, "POST", target, timestamp, body, algorithm).hexdigest(secret)
+    signature.should eq("eaa4ed45f37eee3051a26f6b2cbd082bb3500ba75950c2fa3c3e19a96fe1ec0c")
+
+    {
+      {"PUT", target, body},
+      {"POST", "/api/report?format=json", body},
+      {"POST", "/api/Report?format=text", body},
+      {"POST", target, "different content"},
+    }.each do |method, path, content|
+      Kemal::Hmac::Token.for_request(name, method, path, timestamp, content, algorithm).hexdigest(secret).should_not eq(signature)
+    end
+  end
+
+  it "authenticates an empty body and normalizes an empty query delimiter" do
+    name = "test-client"
+    secret = "test-secret"
+    target = "/api/report?"
+    client = Kemal::Hmac::Client.new(name, secret)
+    headers = HTTP::Headers.new
+    client.generate_headers("GET", target).each { |key, value| headers[key] = value }
+    request = HTTP::Request.new("GET", target, headers)
+    request.path.should eq("/api/report")
+    handler = Kemal::Hmac::Handler.new({name => [secret]}, signature_version: 2)
+    handler.next = ->(context : HTTP::Server::Context) { context.response.print "signed request received" }
+
+    io, context = create_request_and_return_io_and_context(handler, request)
+
+    context.response.status_code.should eq(200)
+    io.gets_to_end.should contain("signed request received")
+  end
+
+  it "returns 413 when a request exceeds the configured body limit" do
+    name = "test-client"
+    secret = "test-secret"
+    target = "/api/report"
+    body = "report content"
+    client = Kemal::Hmac::Client.new(name, secret)
+    headers = HTTP::Headers.new
+    client.generate_headers("POST", target, body).each { |key, value| headers[key] = value }
+    inputs = {IO::Memory.new(body), HTTP::FixedLengthContent.new(IO::Memory.new(body), body.bytesize)}
+    inputs.each do |input|
+      request = HTTP::Request.new("POST", target, headers)
+      request.body = input
+      handler = Kemal::Hmac::Handler.new({name => [secret]}, signature_version: 2, max_signed_body_bytes: 2)
+
+      _, context = create_request_and_return_io_and_context(handler, request)
+
+      context.response.status_code.should eq(413)
+      context.response.headers["Connection"].should eq("close")
+      context.kemal_authorized_client?.should be_nil
+    end
+  end
+
+  it "returns 400 for a prematurely ended fixed-length body" do
+    name = "test-client"
+    secret = "test-secret"
+    target = "/api/report"
+    body = "report content"
+    client = Kemal::Hmac::Client.new(name, secret)
+    headers = HTTP::Headers.new
+    client.generate_headers("POST", target, body).each { |key, value| headers[key] = value }
+    request = HTTP::Request.new("POST", target, headers)
+    request.body = HTTP::FixedLengthContent.new(IO::Memory.new("report"), body.bytesize)
+    handler = Kemal::Hmac::Handler.new({name => [secret]}, signature_version: 2)
+
+    _, context = create_request_and_return_io_and_context(handler, request)
+
+    context.response.status_code.should eq(400)
+    context.response.headers["Connection"].should eq("close")
+    context.kemal_authorized_client?.should be_nil
+  end
+
+  it "returns 400 when the signed body cannot be read" do
+    name = "test-client"
+    secret = "test-secret"
+    target = "/api/report"
+    body = "report content"
+    client = Kemal::Hmac::Client.new(name, secret)
+    headers = HTTP::Headers.new
+    client.generate_headers("POST", target, body).each { |key, value| headers[key] = value }
+    request = HTTP::Request.new("POST", target, headers)
+    input = IO::Memory.new(body)
+    request.body = input
+    input.close
+    handler = Kemal::Hmac::Handler.new({name => [secret]}, signature_version: 2)
+
+    _, context = create_request_and_return_io_and_context(handler, request)
+
+    context.response.status_code.should eq(400)
+    context.response.headers["Connection"].should eq("close")
+  end
+
+  it "rejects invalid signature settings at initialization" do
+    expect_raises(ArgumentError, /signature_version/) do
+      Kemal::Hmac::Handler.new(signature_version: 3)
+    end
+    expect_raises(ArgumentError, /max_signed_body_bytes/) do
+      Kemal::Hmac::Handler.new(signature_version: 2, max_signed_body_bytes: -1)
+    end
+  end
+end

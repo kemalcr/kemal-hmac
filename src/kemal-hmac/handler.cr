@@ -13,7 +13,11 @@ module Kemal::Hmac
   # `HTTP::Server::Context#authorized_hmac_client?` is set when the client is
   # authorized.
   class Handler < Kemal::Handler
+    DEFAULT_MAX_SIGNED_BODY_BYTES = 1_048_576
+
     @hmac_algorithm : OpenSSL::Algorithm
+    @signature_version = 1
+    @max_signed_body_bytes = DEFAULT_MAX_SIGNED_BODY_BYTES
 
     # initialize the Kemal::Hmac::Handler
     # note: "BLUE" and "GREEN" in this context are two different secrets for the same client. This is a common pattern to allow for key rotation without downtime.
@@ -41,7 +45,10 @@ module Kemal::Hmac
       hmac_key_delimiter : String? = nil,
       hmac_algorithm : String? = nil,
       enable_env_lookup : Bool = false,
+      signature_version : Int32 = 1,
+      max_signed_body_bytes : Int32 = DEFAULT_MAX_SIGNED_BODY_BYTES,
     )
+      configure_signatures(signature_version, max_signed_body_bytes)
       @hmac_client_header = hmac_client_header || HMAC_CLIENT_HEADER
       @hmac_timestamp_header = hmac_timestamp_header || HMAC_TIMESTAMP_HEADER
       @hmac_token_header = hmac_token_header || HMAC_TOKEN_HEADER
@@ -61,6 +68,20 @@ module Kemal::Hmac
 
       @secrets_cache = hmac_secrets
       @secrets_cache = normalize_client_hash(@secrets_cache)
+    end
+
+    # Configure the signature format before registering this middleware.
+    def configure_signatures(signature_version : Int32?, max_signed_body_bytes : Int32?)
+      signature_version ||= @signature_version
+      max_signed_body_bytes ||= @max_signed_body_bytes
+      unless signature_version.in?(1, 2)
+        raise ArgumentError.new("signature_version must be 1 or 2")
+      end
+      if max_signed_body_bytes < 0
+        raise ArgumentError.new("max_signed_body_bytes must be nonnegative")
+      end
+      @signature_version = signature_version
+      @max_signed_body_bytes = max_signed_body_bytes
     end
 
     def call(context)
@@ -114,10 +135,18 @@ module Kemal::Hmac
         return
       end
 
-      token_valid = false
-      client_secrets.each do |secret|
-        token_valid = valid_token?(token, secret, client, context.request.path, timestamp)
-        break if token_valid
+      if @signature_version == 2
+        request = context.request
+        body = read_signed_body(context)
+        return unless body
+        signed = Token.for_request(client, request.method, Token.request_target(request), timestamp, body, @hmac_algorithm)
+        token_valid = client_secrets.any? do |secret|
+          Crypto::Subtle.constant_time_compare(signed.hexdigest(secret), token)
+        end
+      else
+        token_valid = client_secrets.any? do |secret|
+          valid_token?(token, secret, client, context.request.path, timestamp)
+        end
       end
 
       # if no valid token was found, reject the request
@@ -130,6 +159,39 @@ module Kemal::Hmac
       # if we make it here, the request is valid so set the authorized client on the context
       context.kemal_authorized_client = client
       return call_next(context)
+    end
+
+    private def read_signed_body(context) : Bytes?
+      request = context.request
+      return Bytes.empty unless input = request.body
+
+      if input.is_a?(HTTP::FixedLengthContent) && input.read_remaining > @max_signed_body_bytes
+        return reject_signed_body(context, 413, "Request body exceeds the signed body limit")
+      end
+
+      buffer = IO::Memory.new
+      begin
+        IO.copy(input, buffer, @max_signed_body_bytes)
+        extra_byte = input.read_byte
+      rescue IO::Error
+        return reject_signed_body(context, 400, "Invalid or incomplete request body")
+      end
+      if extra_byte
+        return reject_signed_body(context, 413, "Request body exceeds the signed body limit")
+      end
+      if input.is_a?(HTTP::FixedLengthContent) && input.read_remaining > 0
+        return reject_signed_body(context, 400, "Incomplete request body")
+      end
+
+      buffer.rewind
+      request.body = buffer
+      buffer.to_slice
+    end
+
+    private def reject_signed_body(context, status_code : Int32, message : String) : Nil
+      context.response.status_code = status_code
+      context.response.headers["Connection"] = "close"
+      context.response.print message
     end
 
     # Check the request token by building our own with our known metadata and secret

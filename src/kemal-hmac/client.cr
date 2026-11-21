@@ -22,12 +22,23 @@ module Kemal::Hmac
     # returns a Hash of the HMAC headers
     def generate_headers(path : String) : Hash(String, String)
       timestamp = Time::Format::ISO_8601_DATE_TIME.format(Time.utc)
-      hmac_token = Kemal::Hmac::Token.new(@client, path.split("?").first, timestamp, @algorithm).hexdigest(@secret)
+      token = Token.new(@client, path.split("?").first, timestamp, @algorithm)
+      build_headers(timestamp, token)
+    end
 
-      return {
+    # Generates version 2 headers for the method, request target, and body being sent.
+    def generate_headers(method : String, resource : String, body : String | Bytes = "") : Hash(String, String)
+      timestamp = Time::Format::ISO_8601_DATE_TIME.format(Time.utc)
+      target = Token.request_target(HTTP::Request.new(method, resource))
+      token = Token.for_request(@client, method, target, timestamp, body, @algorithm)
+      build_headers(timestamp, token)
+    end
+
+    private def build_headers(timestamp : String, token : Token) : Hash(String, String)
+      {
         HMAC_CLIENT_HEADER    => @client,
         HMAC_TIMESTAMP_HEADER => timestamp,
-        HMAC_TOKEN_HEADER     => hmac_token,
+        HMAC_TOKEN_HEADER     => token.hexdigest(@secret),
       }
     end
   end

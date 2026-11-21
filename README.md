@@ -13,10 +13,10 @@ HMAC middleware for Crystal's [kemal](https://github.com/kemalcr/kemal) framewor
 
 Why should I use HMAC in a client/server system with kemal? Here are some of the benefits:
 
-- **Data Integrity**: HMAC ensures that the data hasn't been tampered with during transit
+- **Data Integrity**: Version 2 signs the HTTP method, request target, and body. See [request signatures](#signing-the-method-query-and-body) for what each version covers.
 - **Authentication**: Verifies the identity of the sender, providing a level of trust in the communication
 - **Keyed Security**: Uses a secret key for hashing, making it more secure than simple hash functions
-- **Protection Against Replay Attacks**: By incorporating timestamps, HMAC helps prevent the replay of old messages
+- **Request Expiration**: A timestamp limits how long a signature is accepted. Repeated requests within the configured window are still accepted.
 
 This readme will be broken up into two parts. The first part will cover how to use the server middleware in a kemal application. The second part will cover how to use the client to communicate with a server that uses the middleware.
 
@@ -281,6 +281,29 @@ require "kemal-hmac"
 client = Kemal::Hmac::Client.new("my_client", "my_secret")
 hmac_headers = client.generate_headers("/api/path")
 ```
+
+### Signing the method, query, and body
+
+The default version 1 format signs the client name, lowercased path, and timestamp. To bind the HTTP method, path and query, and body, enable version 2 on the server and generate headers using the version 2 overload on the client.
+
+```crystal
+# Server
+hmac_auth({"my_client" => ["my_secret"]}, signature_version: 2)
+```
+
+```crystal
+# Client
+client = Kemal::Hmac::Client.new("my_client", "my_secret")
+target = "/orders?region=eu"
+body = %({"quantity":1})
+headers = HTTP::Headers.new
+client.generate_headers("POST", target, body).each { |name, value| headers[name] = value }
+response = HTTP::Client.post("https://example.com#{target}", headers: headers, body: body)
+```
+
+Deploy the server and its clients with the same signature version. A version 2 handler accepts only version 2 signatures. Register it before middleware that reads the body or materializes decoded query parameters. Keep the method and request target consistent through routing, and send the same target and bytes that were signed. The body is buffered up to `max_signed_body_bytes` (1 MiB by default), and the server returns 413 for larger requests. Downstream handlers can read the verified body as usual.
+
+For other HTTP clients, the version 2 message starts with the UTF-8 bytes of `kemal-hmac-v2` followed by a newline. Append these five fields in order, each as its decimal byte length, a colon, and the field bytes: client header, method, request target, timestamp header, and lowercase hexadecimal SHA256 of the body (including for an empty body). Use Crystal's parsed `HTTP::Request#path`, followed by `?` and `HTTP::Request#query` when the query is nonempty. Send an origin-form target and preserve the case and escaping of its path and query. Compute the configured HMAC over that message and transmit its lowercase hexadecimal form. The host and other HTTP headers are outside the signature.
 
 ### Example: Making an HTTP Request
 
