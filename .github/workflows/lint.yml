@@ -15,7 +15,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    # Preserve the required status check names from the matrix labels.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
 
     steps:
       - name: checkout
