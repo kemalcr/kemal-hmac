@@ -4,6 +4,8 @@ require "http/client"
 require "http/web_socket"
 require "spec"
 
+ACCEPTANCE_TEST_PORT = ENV.fetch("ACCEPTANCE_TEST_PORT", "3000").to_i
+
 describe "websocket" do
   it "successfully sends a websocket request to the server with HMAC auth" do
     hmac_client = Kemal::Hmac::Client.new("my_ws_client", "my_secret_3")
@@ -17,7 +19,7 @@ describe "websocket" do
 
     # Open websocket connection
     ws = HTTP::WebSocket.new(
-      URI.parse("ws://localhost:3000/websocket"),
+      URI.parse("ws://127.0.0.1:#{ACCEPTANCE_TEST_PORT}/websocket"),
       headers: headers
     )
 
@@ -34,7 +36,7 @@ describe "websocket" do
     response.should eq "websocket success"
   end
 
-  it "does not provide HMAC headers and fails the websocket request" do
+  it "rejects invalid HMAC headers in the websocket handshake" do
     hmac_client = Kemal::Hmac::Client.new("my_ws_client", "invalid_secret")
 
     path = "/websocket"
@@ -44,24 +46,20 @@ describe "websocket" do
       headers.add(key, value)
     end
 
-    begin
-      ws = HTTP::WebSocket.new(
-        URI.parse("ws://localhost:3000/websocket"),
+    expect_raises(Socket::Error, /Handshake got denied\. Status code was 401\./) do
+      HTTP::WebSocket.new(
+        URI.parse("ws://127.0.0.1:#{ACCEPTANCE_TEST_PORT}/websocket"),
         headers: headers
       )
-    rescue ex : Socket::Error
-      ex.message.not_nil!.should contain "Handshake got denied. Status code was 401."
     end
   end
 
-  it "does not provide the correct HMAC headers and fails the websocket request" do
-    begin
-      ws = HTTP::WebSocket.new(
-        URI.parse("ws://localhost:3000/websocket"),
+  it "rejects missing HMAC headers in the websocket handshake" do
+    expect_raises(Socket::Error, /Handshake got denied\. Status code was 401\./) do
+      HTTP::WebSocket.new(
+        URI.parse("ws://127.0.0.1:#{ACCEPTANCE_TEST_PORT}/websocket"),
         headers: HTTP::Headers.new
       )
-    rescue ex : Socket::Error
-      ex.message.not_nil!.should contain "Handshake got denied. Status code was 401."
     end
   end
 end
@@ -84,7 +82,7 @@ describe "All HTTP Methods" do
         headers: headers,
       )
 
-      uri = URI.parse("http://localhost:3000")
+      uri = URI.parse("http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}")
       http_client = HTTP::Client.new(uri)
 
       response = http_client.exec(request)
@@ -102,7 +100,7 @@ describe "crest" do
     path = "/crest-client"
 
     response = Crest.get(
-      "http://localhost:3000#{path}",
+      "http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}",
       headers: client.generate_headers(path)
     )
 
@@ -113,10 +111,10 @@ describe "crest" do
   it "successfully sends a request with HMAC auth with the crest client to the crest-client endpoint with query string params" do
     client = Kemal::Hmac::Client.new("my_crest_client", "my_secret")
 
-    path = "/crest-client"
+    path = "/crest-client?foo=bar&q=baz&operation=1/2"
 
     response = Crest.get(
-      "http://localhost:3000#{path}",
+      "http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}",
       headers: client.generate_headers(path)
     )
 
@@ -129,15 +127,14 @@ describe "crest" do
 
     path = "/crest-client?foo=bar&q=baz&operation=1/2"
 
-    begin
+    error = expect_raises(Crest::Unauthorized) do
       Crest.get(
-        "http://localhost:3000#{path}",
+        "http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}",
         headers: client.generate_headers(path)
       )
-    rescue ex : Crest::Unauthorized
-      ex.response.status_code.should eq 401
-      ex.response.body.should contain "Unauthorized: HMAC token does not match"
     end
+    error.response.status_code.should eq 401
+    error.response.body.should contain "Unauthorized: HMAC token does not match"
   end
 
   it "fails to send a request with HMAC auth to an endpoint using the POST HTTP verb" do
@@ -145,15 +142,14 @@ describe "crest" do
 
     path = "/submit"
 
-    begin
+    error = expect_raises(Crest::Unauthorized) do
       Crest.post(
-        "http://localhost:3000#{path}",
+        "http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}",
         headers: client.generate_headers(path)
       )
-    rescue ex : Crest::Unauthorized
-      ex.response.status_code.should eq 401
-      ex.response.body.should contain "Unauthorized: HMAC token does not match"
     end
+    error.response.status_code.should eq 401
+    error.response.body.should contain "Unauthorized: HMAC token does not match"
   end
 
   it "successfully sends a request with HMAC auth with the crest client an endpoint using the POST HTTP verb" do
@@ -162,7 +158,7 @@ describe "crest" do
     path = "/submit"
 
     response = Crest.post(
-      "http://localhost:3000#{path}",
+      "http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}",
       headers: client.generate_headers(path)
     )
 
@@ -182,7 +178,7 @@ describe "http/client" do
       headers.add(key, value)
     end
 
-    response = HTTP::Client.get("http://localhost:3000#{path}", headers: headers)
+    response = HTTP::Client.get("http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}", headers: headers)
 
     response.status_code.should eq 200
     response.body.should contain "Hi, my_standard_client!"
@@ -198,7 +194,7 @@ describe "http/client" do
       headers.add(key, value)
     end
 
-    response = HTTP::Client.post("http://localhost:3000#{path}", headers: headers)
+    response = HTTP::Client.post("http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}", headers: headers)
 
     response.status_code.should eq 200
     response.body.should contain "Hi, my_standard_client! I got your POST request"
@@ -214,7 +210,7 @@ describe "http/client" do
       headers.add(key, value)
     end
 
-    response = HTTP::Client.get("http://localhost:3000#{path}", headers: headers)
+    response = HTTP::Client.get("http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}", headers: headers)
 
     response.status_code.should eq 200
     response.body.should contain "Hi, my_standard_client!"
@@ -230,7 +226,7 @@ describe "http/client" do
       headers.add(key, value)
     end
 
-    response = HTTP::Client.get("http://localhost:3000#{path}", headers: headers)
+    response = HTTP::Client.get("http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}", headers: headers)
 
     response.status_code.should eq 401
     response.body.should contain "Unauthorized: HMAC token does not match"
@@ -246,7 +242,7 @@ describe "http/client" do
       headers.add(key, value)
     end
 
-    response = HTTP::Client.get("http://localhost:3000#{path}", headers: headers)
+    response = HTTP::Client.get("http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}#{path}", headers: headers)
 
     response.status_code.should eq 401
     response.body.should contain "Unauthorized: no secrets found for client: unknown_client"
@@ -262,7 +258,7 @@ describe "http/client" do
       headers.add(key, value)
     end
 
-    response = HTTP::Client.get("http://localhost:3000/", headers: headers)
+    response = HTTP::Client.get("http://127.0.0.1:#{ACCEPTANCE_TEST_PORT}/", headers: headers)
 
     response.status_code.should eq 401
     response.body.should contain "Unauthorized: HMAC token does not match"

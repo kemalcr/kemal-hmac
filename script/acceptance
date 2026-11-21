@@ -1,62 +1,40 @@
 #!/bin/bash
 
-source script/setup-env $@
+source script/setup-env "$@"
 
-# Function to kill any existing server processes
-kill_existing_server() {
-  echo "Checking for existing server processes on port 3000..."
-  set +e
-  existing_pid=$(lsof -ti :3000)
-  set -e
-  if [ -n "$existing_pid" ]; then
-    echo "Killing existing server process with PID $existing_pid..."
-    kill -9 $existing_pid
-  else
-    echo "No existing server process found on port 3000."
-  fi
-}
-
-# Kill any existing server processes
-kill_existing_server
-
-# Start the Crystal server in the background
-echo -e "🚀 ${BLUE}starting the server${OFF}"
-crystal run script/acceptance_tests/server.cr --exclude-warnings $SHARDS_INSTALL_PATH &
-
-# Get the PID of the background process
-SERVER_PID=$!
-echo "Server started with PID $SERVER_PID"
-
-# Define a function to kill the background process
+test_dir=$(mktemp -d)
+server_pid=""
 cleanup() {
-  echo "Killing background process with PID $SERVER_PID..."
-  kill $SERVER_PID
-  kill_existing_server
+  if [[ -n "$server_pid" ]]; then
+    # Signal Bash's own background job even if the server exited early.
+    kill %% 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
+  rm -rf "$test_dir"
 }
-
-# Set the trap to call the cleanup function on script exit
 trap cleanup EXIT
 
-# Check if the server is up and running
+echo -e "🚀 ${BLUE}starting the server${OFF}"
+crystal build script/acceptance_tests/server.cr --exclude-warnings "$SHARDS_INSTALL_PATH" -o "$test_dir/server"
+ACCEPTANCE_SERVER_PORT_FILE="$test_dir/port" "$test_dir/server" >"$test_dir/server.log" 2>&1 &
+server_pid=$!
+
 echo -e "⏳ ${BLUE}waiting for the server to be ready${OFF}"
-for i in {1..60}; do
-  if curl -s http://localhost:3000 > /dev/null; then
-    echo -e "✅ ${GREEN}server is ready${OFF}"
+for ((attempt = 0; attempt < 100; attempt++)); do
+  if [[ -s "$test_dir/port" ]] || ! kill -0 "$server_pid" 2>/dev/null; then
     break
-  else
-    echo -e "⏳ ${YELLOW}server not ready, retrying in 1 second${OFF}"
-    sleep 1
   fi
+  sleep 0.1
 done
+if [[ ! -s "$test_dir/port" ]] || ! kill -0 "$server_pid" 2>/dev/null; then
+  cat "$test_dir/server.log" >&2
+  echo "Acceptance server failed to start" >&2
+  exit 1
+fi
 
-# Run the tests
 echo -e "🧪 ${BLUE}running the acceptance tests${OFF}"
-crystal run script/acceptance_tests/tests.cr --exclude-warnings $SHARDS_INSTALL_PATH
-
-# Capture the exit status of the tests
-TEST_EXIT_STATUS=$?
-echo "Tests completed with exit status $TEST_EXIT_STATUS"
-
-kill_existing_server
-
-exit $TEST_EXIT_STATUS
+crystal build script/acceptance_tests/tests.cr --exclude-warnings "$SHARDS_INSTALL_PATH" -o "$test_dir/tests"
+if ! ACCEPTANCE_TEST_PORT=$(cat "$test_dir/port") "$test_dir/tests"; then
+  cat "$test_dir/server.log" >&2
+  exit 1
+fi

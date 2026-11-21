@@ -56,4 +56,9 @@ ws "/websocket" do |socket|
   socket.close
 end
 
-Kemal.run
+Kemal.run do |config|
+  if port_file = ENV["ACCEPTANCE_SERVER_PORT_FILE"]?
+    address = config.server.not_nil!.bind_tcp("127.0.0.1", 0)
+    File.write(port_file, address.port.to_s)
+  end
+end
